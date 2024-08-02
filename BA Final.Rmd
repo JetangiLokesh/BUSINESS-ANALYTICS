@@ -1,0 +1,310 @@
+---
+title: "Business A
+nalytics PROJECT"
+author: "GROUP-7"
+date: "2023-04-29"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+
+
+
+```{r}
+
+#install.packages("RANN")
+#install.packages("pROC")
+#install.packages("rpart")
+#install.packages("rpart.plot")
+
+```
+
+```{r}
+library(readr)
+library(tidyverse)
+library(caret)
+library(pROC)
+library(ggcorrplot)
+library(gmodels)
+library(rpart)
+library(RANN)
+library(rpart.plot)
+```
+```{r}
+#Importing the Customer churn dataset
+customer_churn <- read.csv("C:/Users/jetan/Downloads/Churn_Train.csv")
+head(customer_churn) #printing the top rows of the dataset
+```
+```{r}
+#structure of the dataset
+str(customer_churn)
+```
+```{r}
+#Checking the summary of the dataset
+summary(customer_churn)
+```
+```{r}
+#As per the summary observed the dataset contains Negative Values, Missing values and Outliers So we are trying to minimize the error rate without directly eliminating them from the dataset as this is a small dataset
+```
+
+```{r}
+# BY OBSERVING THE structure and summary of the dataset we are converting the 
+#char variables to factors
+#Conversion 
+customer_churn <- customer_churn %>% mutate_if(is.character, as.factor)
+str(customer_churn) #checking the conversion status
+```
+```{r}
+#Identifying the Negative values column-wise
+sapply(customer_churn, function(x) sum(x < 0, na.rm = TRUE))
+
+```
+```{r}
+#Identifying the missing values
+missing_values_in_dataset <- is.na(customer_churn)
+
+# Count the number of missing values in each column
+colSums(missing_values_in_dataset)
+
+```
+
+```{r}
+# Replace negative values in numeric columns with their absolute value
+customer_churn[which(customer_churn < 0 & is.numeric(customer_churn))] <- 
+  abs(customer_churn[which(customer_churn < 0 & is.numeric(customer_churn))])
+```
+
+```{r}
+# Impute missing numeric values with median imputation
+library(caret)
+
+imputation_model <- preProcess(customer_churn %>% select_if(is.numeric), method = "medianImpute")
+imputed_data <- predict(imputation_model, customer_churn %>% select_if(is.numeric))
+
+# Replace missing values in the original data with the imputed values
+customer_churn <- customer_churn %>% 
+  select(-where(is.numeric)) %>% 
+  bind_cols(imputed_data)
+```
+
+```{r}
+#library(ggplot2)
+
+customer_churn %>%
+  count(churn) %>%
+  mutate(prop = n / sum(n)) %>%
+  ggplot(aes(x = churn, y = prop, fill = churn)) +
+  geom_col() +
+  geom_text(aes(label = scales::percent(prop)),
+            position = position_stack(vjust = 0.5)) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  labs(x = "Churn", y = "Proportion", fill = "Churn") +
+  ggtitle("Proportion of Churn") +
+  theme_classic()
+
+```
+
+```{r}
+#From the above graph we can see that only around 14% of population are Churned,      rest 86% are retained in the telecom network.
+```
+
+```{r}
+#PROPORTION OF AREA_CODE
+customer_churn %>% 
+  select(area_code, churn) %>% 
+  na.omit() %>% 
+  group_by(area_code, churn) %>% 
+  summarize(count = n()) %>% 
+  mutate(prop = count / sum(count)) %>% 
+  ggplot(aes(x = area_code, y = prop, fill = churn)) +
+  geom_col() +
+  geom_text(aes(label = scales::percent(prop, accuracy = 0.1)),
+            position = position_stack(vjust = 0.5),
+            size = 3) +
+  scale_fill_manual(labels = c("Churn: No", "Churn: Yes"),
+                    values = c("azure2", "yellow")) +
+  labs(y = "Proportion", title = "Proportion of area_code") +
+  theme_classic() +
+  theme(legend.title = element_blank())
+```
+
+```{r}
+#proportion of international_plan
+customer_churn %>%
+  count(international_plan, churn) %>%
+  group_by(international_plan) %>%
+  mutate(prop = n / sum(n)) %>%
+  ggplot(aes(x = international_plan, y = prop, fill = churn)) +
+  geom_col() +
+  geom_text(aes(label = paste0(format(prop * 100, digits = 1), "%")),
+            position = position_stack(vjust = 0.5),
+            size = 3) +
+  labs(y = "Proportion", title = "Proportion of international_plan") +
+  scale_fill_manual(labels = c("Churn: No", "Churn: Yes"),
+                    values = c("azure2", "yellow")) +
+  theme_classic() +
+  theme(legend.title = element_blank())
+
+```
+
+```{r}
+#PROPORTION OF VOICE_MAIL_PLAN
+as.data.frame(prop.table(table(customer_churn[c("voice_mail_plan", "churn")]))) %>%
+  ggplot(aes(x = voice_mail_plan, y = Freq, fill = churn)) +
+  geom_col() + 
+  geom_text(aes(label = paste0(round(Freq * 100, 1), "%")),
+            position = position_stack(vjust = 0.5),
+            size = 2.8) + 
+  theme_classic() + 
+  labs(y = "Proportion", title = "Proportion of customers with voicemail plan") + 
+  theme(legend.title = element_blank()) + 
+  scale_fill_manual(labels = c("No Churn", "Churn"),
+                    values = c("azure2", "yellow"))
+
+```
+
+```{r}
+#Correlation matrix
+# Compute correlation matrix for numeric columns
+Churn_Data_cor <- round(cor(customer_churn %>% select_if(is.numeric)), 1)
+
+# Visualize correlation using ggcorrplot
+ggcorrplot(Churn_Data_cor, title = "Correlation", type = "lower") +
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.text.x = element_text(angle = 90))
+
+# Create dummy variables for categorical columns, except "state" and "churn"
+customer_churn <- customer_churn %>%
+  select(-state, -churn) %>%
+  fastDummies::dummy_cols(remove_selected_columns = TRUE) %>%
+  mutate(state = customer_churn$state, churn = customer_churn$churn)
+
+```
+ 
+
+```{r}
+#Splitting dataset into training (80%) and validation (20%)
+set.seed(123)
+index <- createDataPartition(customer_churn$churn, p=0.8, list=FALSE)
+Churn_Data_train <- customer_churn[index,]
+Churn_Data_test <- customer_churn[-index,]
+
+```
+ 
+```{r}
+# Data scaling
+scaling <- preProcess(Churn_Data_train %>% select_if(is.numeric), method = c("center", "scale"))
+training_normalized <- predict(scaling, Churn_Data_train %>% select_if(is.numeric))
+testing_normalized <- predict(scaling, Churn_Data_test %>% select_if(is.numeric))
+
+# Add churn column back to the normalized data frames
+training_normalized$churn <- Churn_Data_train$churn
+testing_normalized$churn <- Churn_Data_test$churn
+
+```
+
+```{r}
+#Logistic Regression Model building
+logistic_model1 <- glm(churn ~ ., data = training_normalized , family= "binomial")
+
+#Summary
+summary(logistic_model1)
+```
+
+```{r}
+#Predictions
+set.seed(1234)
+predictions <-predict(object = logistic_model1,testing_normalized, type ="response")
+
+sequence1 <-data.frame(pred_cutoff =seq(0.5,0.9,0.1), pred_accuracy 
+=rep(0,5))
+
+for (i in 1:5){
+ logistic_model11 <-as.factor(ifelse(predictions > sequence1$pred_cutoff[i], "yes", 
+"no"))
+ sequence1[i,2] <-confusionMatrix(logistic_model11,Churn_Data_test$churn 
+)$overall[1]
+}
+#probability predictions along with accuracy
+sequence1
+```
+
+
+```{r}
+#Assigning labels based on maximum probability prediction
+Model_Pre_lables <-as.factor(ifelse(predictions>sequence1$pred_cutoff
+                            [which.max(sequence1$pred_accuracy)] ,"yes","no"))
+CrossTable(x=testing_normalized$churn, y = Model_Pre_lables, prop.chisq 
+=FALSE)
+confusionMatrix(Model_Pre_lables,testing_normalized$churn)
+
+```
+
+
+```{r}
+#Roc curve for logistic model
+roc(Churn_Data_test$churn, predictions)
+plot.roc(roc(Churn_Data_test$churn, predictions))
+```
+ 
+```{r}
+##Decision Tree Model building
+decision_model <-rpart(churn ~ .,data = training_normalized, method ="class")
+rpart.plot(decision_model, type =3, box.palette =c("orange", "lightgreen"),
+           fallen.leaves =TRUE)
+#Predict values based on decision_model.
+pred_labels <-predict(object = decision_model,testing_normalized, type ="class")
+predictions <-predict(object = decision_model,testing_normalized)
+
+```
+
+```{r}
+#Efficiency Metrics
+CrossTable(x=testing_normalized$churn, y = pred_labels, prop.chisq =FALSE)
+confusionMatrix(pred_labels,testing_normalized$churn)
+
+```
+
+```{r}
+#AUC for decision model
+roc(Churn_Data_test$churn, predictions[,2])
+plot.roc(roc(Churn_Data_test$churn, predictions[,2]))
+
+```
+
+```{r}
+# Load the Customers_To_Predict dataset
+load("C:/Users/jetan/Downloads/Customers_To_Predict.RData")
+Customers_To_Predict_data <- Customers_To_Predict
+
+# Remove the 'state' column and create dummy variables for categorical features
+Customers_To_Predict <- Customers_To_Predict %>%
+  dplyr::select(-state) %>%
+  fastDummies::dummy_cols(remove_selected_columns = TRUE)
+
+# Scale the data
+Customers_To_Predict <- as.data.frame(scale(Customers_To_Predict))
+
+# Make predictions using the decision_model
+predict_labels <- predict(object = decision_model, Customers_To_Predict, type = "class")
+
+# Add the predicted churn labels to the original dataset and create a frequency table
+Customers_To_Predict <- Customers_To_Predict_data %>%
+  dplyr::mutate(Churn_Prob = predict_labels)
+
+table(Customers_To_Predict$Churn_Prob)
+
+```
+
+
+
+
